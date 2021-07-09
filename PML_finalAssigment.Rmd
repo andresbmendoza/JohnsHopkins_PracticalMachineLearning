@@ -1,0 +1,187 @@
+---
+title: "Practical Machine Learning Final Assessment"
+author: "Andrés Betancourt"
+date: "7/8/2021"
+output: html_document
+---
+
+# Practical Machine Learning: Project Report  
+
+
+<b>Practical Machine Learning</b> from <b>Johns Hopkins Bloomberg School of Public Health</b> from Coursera.  
+ 
+GitHub: [https://github.com/andresbmendoza/JohnsHopkins_PracticalMachineLearning.git](https://github.com/andresbmendoza/JohnsHopkins_PracticalMachineLearning.git)  
+
+
+## Background  
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).   
+
+## Data Sources  
+* The training data for this project is available here:
+
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv)  
+
+* The test data is available here:
+
+[https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv](https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv)  
+
+The data for this project comes from this original source: [http://groupware.les.inf.puc-rio.br/har](http://groupware.les.inf.puc-rio.br/har). If you use the document you create for this class for any purpose please cite them as they have been very generous in allowing their data to be used for this kind of assignment.  
+
+## Intended Results 
+The goal of this project is to predict the manner in which they did the exercise. This is the "classe" variable in the training set. You may use any of the other variables to predict with. You should create a report describing how you built your model, how you used cross validation, what you think the expected out of sample error is, and why you made the choices you did. You will also use your prediction model to predict 20 different test cases. 
+
+This assignment has two part:
+
+1. Your submission should consist of a link to a Github repo with your R markdown and compiled HTML file describing your analysis. Please constrain the text of the writeup to < 2000 words and the number of figures to be less than 5. It will make it easier for the graders if you submit a repo with a gh-pages branch so the HTML page can be viewed online (and you always want to make it easy on graders :-).  
+2. You should also apply your machine learning algorithm to the 20 test cases available in the test data above. Please submit your predictions in appropriate format to the programming assignment for automated grading. See the programming assignment for additional details.  
+
+## Reproducibility  
+In order to reproduce the same results, you need a certain set of packages as well as setting a pseudo random seed equal to the one I have used.
+
+The following Libraries were used for this project, If some library is not installed first install it using the command install.packages("Pack_Name"):
+
+```{r warning=FALSE, error=FALSE}
+library(ggplot2)
+library(RColorBrewer)
+library(rattle)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```  
+
+## Getting The Data  
+Creating the Data Folder.  
+```{r warning=FALSE, error=FALSE}
+WD <- getwd()
+if (!dir.exists(paste(WD,"Data", sep = "/"))) dir.create(paste(WD,"Data", sep = "/"))
+
+```  
+
+Download the Test and Training data into the 'Data' Folder
+```{r warning=FALSE, error=FALSE}
+TrainFile <- "./Data/pml_Training.csv"
+TestFile  <- "./Data/pml_Testing.csv"
+TrainUrl <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+TestUrl <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+
+
+if (!file.exists(TrainFile)) {
+  download.file(TrainUrl, destfile = TrainFile)
+}
+if (!file.exists(TestFile)) {
+  download.file(TestUrl, destfile = TestFile)
+}
+
+```  
+
+### Loading Data  
+After downloading the data, The CSV files should be loaded into the environmental throughout the read.csv command to create Dataframes to be manipulated.  
+```{r warning=FALSE, error=FALSE}
+TrainRaw <- read.csv(TrainFile)
+TestRaw <- read.csv(TestFile)
+```  
+The training data set contains `r dim(TrainRaw)[1]` observations and `r dim(TrainRaw)[2]` variables, while the testing data set contains `r dim(TestRaw)[1]` observations and `r dim(TestRaw)[2]` variables.
+
+The variable named `classe`  in the training data is the Explained/Outcome Variable.  
+
+## Cleaning Data Process  
+The Dataset have to be cleaned and is necessary to handle the of observations with missing values.
+Furthermore, variables that has not to much variability (Variance near to Zero) could be exclude from our model.  
+
+Using the <b>Near Zero Variance</b> function, is possible to discriminate Variables which do not explain or add variation to the data.  
+```{r warning=FALSE, error=FALSE}
+NZV <- nearZeroVar(TrainRaw, saveMetrics = TRUE)
+Training <- TrainRaw[, !NZV$nzv]
+Testing <- TestRaw[, !NZV$nzv]
+```  
+
+*Removing columns As Subject name, and timeStamps which not add value to our models.*  
+
+```{r warning=FALSE, error=FALSE}
+Training <- Training[, -c(1:5)]
+Testing <- Testing[, -c(1:5)]
+```  
+
+*Removing columns with`NA's`*
+```{r warning=FALSE, error=FALSE}
+isNAcol <- colSums(is.na(Training)) == 0
+Training <- Training[, isNAcol]
+Testing <- Testing[, isNAcol]
+```  
+
+After clean the Training and Testing Data sets contains:
+
+Training:  `r dim(Training)[1]` observations and `r dim(Training)[2]` variables.
+Testing :   `r dim(Testing)[1]` observations and `r dim(Testing)[2]`  variables.  
+
+
+## Partitioning Training Set and create the Validation Data 
+
+The training set will be splited into two sets:
+
+* A pure training data set (70%)
+* Validation data set (30%). The validation data set will be used to conduct cross validation in future steps.  
+```{r warning=FALSE, error=FALSE}
+set.seed(56789)
+inTrain <- createDataPartition(Training$classe, p = 0.70, list = FALSE)
+Training <- Training[inTrain, ]
+Validation <- Training[-inTrain, ]
+```  
+
+Our Model will be created with:
+
+* *Training*   Data which include: `r dim(Training)[1]`   observations.
+* *Validation* Data which include: `r dim(Validation)[1]` observations. 
+* *Testing*    Data which include: `r dim(Testing)[1]`    observations.
+
+## Predictive Data Modelling for Activity Recognition  
+
+### Decision Tree  
+Fitting a predictive based on <b>Decision Tree</b> algorithm.  
+```{r warning=FALSE, error=FALSE}
+FitTree <- rpart(classe ~ ., data = Training, method = "class")
+prp(FitTree, main ="Decision Tree: Activity Recognition", box.palette = "BlGnYl")
+```  
+
+Model's performance on the <b>validation</b> data set.  
+```{r warning=FALSE, error=FALSE}
+PredictTree <- predict(FitTree, Validation, type = "class")
+confusionMatrix(Validation$classe, PredictTree)
+accuracy.Tree <- postResample(PredictTree, Validation$classe)
+OSE.Tree <- 1 - as.numeric(confusionMatrix(Validation$classe, PredictTree)$overall[1])
+```  
+
+* The Estimated Accuracy of the Decision Tree Model:  `r accuracy.Tree[1]*100`% .
+* The Estimated Out-of-Sample Error is `r OSE.Tree*100`%.  
+
+### Predictive Data by Random Forest Algorithm
+
+Fitting a predictive based on <b>Random</b> algorithm.  
+We will use <b>5-fold cross validation</b> when applying the algorithm.  
+```{r warning=FALSE, error=FALSE}
+FitRF <- train(classe ~ ., data = Training, method = "rf",
+                 trControl = trainControl(method = "cv", 5), ntree = 250, allowParallel = TRUE)       # Apply Cross Validation with 5 fold.
+FitRF
+```  
+
+The performance of the model on the <b>validation</b> data set:
+
+```{r warning=FALSE, error=FALSE}
+PredictRF <- predict(FitRF, Validation)
+confusionMatrix(Validation$classe, PredictRF)
+accuracyRF <- postResample(PredictRF, Validation$classe)
+OSE.RF <- 1 - as.numeric(confusionMatrix(Validation$classe, PredictRF)$overall[1])
+
+```  
+
+* The Estimated Random Forest Accuracy : `r accuracyRF[1]*100`% 
+* The Estimated Out-of-Sample Error    : `r OSE.RF*100`%.  
+ 
+
+## Predicting The Outcome from the Test set
+
+Applying the <b>Random Forest</b> model to the testing data set (the problem_id column has been removed)
+```{r warning=FALSE, error=FALSE}
+predict(FitRF, Testing[, -length(names(Testing))])
+```  
